@@ -1,7 +1,7 @@
 ﻿<?php
 // ==========================================================
 // SECJ3483 Web Technology
-// Person BMI Slim Backend - Phase 2 Backend Security Version
+// Person BMI Slim Backend - Phase 3 JWT Protected Version
 // Fixes added based on lab requirements:
 // 1 Backend validation
 // 2 Backend BMI calculation
@@ -131,20 +131,82 @@ function getBmiCategory(float $bmi): string
     return 'Obese';
 }
 
-// Phase 2 keeps the starter fake token flow. Real JWT protection is added later.
-function createFakeToken(array $user): string
+// Fix 5: Signed JWT-like authentication using HS256.
+// This avoids extra packages and is suitable for the lab environment.
+define('JWT_SECRET', 'SECJ3483_CHANGE_THIS_SECRET_KEY_FOR_LAB');
+
+function base64UrlEncode(string $data): string
 {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function base64UrlDecode(string $data): string|false
+{
+    $padding = strlen($data) % 4;
+    if ($padding > 0) {
+        $data .= str_repeat('=', 4 - $padding);
+    }
+    return base64_decode(strtr($data, '-_', '+/'), true);
+}
+
+function createJwtToken(array $user): string
+{
+    $header = [
+        'alg' => 'HS256',
+        'typ' => 'JWT'
+    ];
+
     $payload = [
         'user_id' => (int) $user['id'],
         'role' => $user['role'],
-        'email' => $user['email'],
-        'note' => 'INSECURE_FAKE_TOKEN_NO_SIGNATURE_NO_EXPIRY'
+        'iat' => time(),
+        'exp' => time() + 3600
     ];
 
-    return base64_encode(json_encode($payload));
+    $encodedHeader = base64UrlEncode(json_encode($header));
+    $encodedPayload = base64UrlEncode(json_encode($payload));
+    $signature = hash_hmac('sha256', $encodedHeader . '.' . $encodedPayload, JWT_SECRET, true);
+
+    return $encodedHeader . '.' . $encodedPayload . '.' . base64UrlEncode($signature);
 }
 
-function getFakeUserFromToken(Request $request): ?array
+function verifyJwtToken(string $token): ?array
+{
+    $parts = explode('.', $token);
+
+    if (count($parts) !== 3) {
+        return null;
+    }
+
+    [$encodedHeader, $encodedPayload, $encodedSignature] = $parts;
+
+    $expectedSignature = base64UrlEncode(
+        hash_hmac('sha256', $encodedHeader . '.' . $encodedPayload, JWT_SECRET, true)
+    );
+
+    if (!hash_equals($expectedSignature, $encodedSignature)) {
+        return null;
+    }
+
+    $payloadJson = base64UrlDecode($encodedPayload);
+    if ($payloadJson === false) {
+        return null;
+    }
+
+    $payload = json_decode($payloadJson, true);
+
+    if (!is_array($payload)) {
+        return null;
+    }
+
+    if (!isset($payload['exp']) || time() > $payload['exp']) {
+        return null;
+    }
+
+    return $payload;
+}
+
+function verifyTokenFromRequest(Request $request): ?array
 {
     $auth = $request->getHeaderLine('Authorization');
 
@@ -152,23 +214,20 @@ function getFakeUserFromToken(Request $request): ?array
         return null;
     }
 
-    $json = base64_decode($matches[1], true);
-
-    if (!$json) {
-        return null;
-    }
-
-    $payload = json_decode($json, true);
-    return is_array($payload) ? $payload : null;
+    return verifyJwtToken($matches[1]);
 }
 
 function requireAuth(Request $request, Response $response): array|Response
 {
-    return getFakeUserFromToken($request) ?? [
-        'user_id' => 1,
-        'role' => 'user'
-    ];
+    $decoded = verifyTokenFromRequest($request);
+
+    if (!$decoded) {
+        return jsonResponse($response, ['error' => 'Unauthorized'], 401);
+    }
+
+    return $decoded;
 }
+
 function requireStaffOrAdmin(array $decoded, Response $response): ?Response
 {
     return null;
@@ -184,7 +243,7 @@ function requireAdmin(array $decoded, Response $response): ?Response
 // ----------------------------------------------------------
 $app->get('/', function (Request $request, Response $response) {
     return jsonResponse($response, [
-        'message' => 'Person BMI Slim Backend - Phase 2 Backend Security Version'
+        'message' => 'Person BMI Slim Backend - Phase 3 JWT Protected Version'
     ]);
 });
 
@@ -284,7 +343,7 @@ $app->post('/api/login', function (Request $request, Response $response) {
             ], 401);
         }
 
-        $token = createFakeToken($user);
+        $token = createJwtToken($user);
 
         return jsonResponse($response, [
             'message' => 'Login successful',

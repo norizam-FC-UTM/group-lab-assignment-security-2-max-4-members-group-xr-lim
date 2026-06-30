@@ -1,7 +1,7 @@
-﻿<?php
+<?php
 // ==========================================================
 // SECJ3483 Web Technology
-// Person BMI Slim Backend - Phase 3 JWT Protected Version
+// Person BMI Slim Backend - Phase 4 Fixed Version
 // Fixes added based on lab requirements:
 // 1 Backend validation
 // 2 Backend BMI calculation
@@ -28,7 +28,7 @@ $app = AppFactory::create();
 $app->addBodyParsingMiddleware();
 
 // Fix 12: Do not show detailed framework errors to API users.
-$app->addErrorMiddleware(true, true, true);
+$app->addErrorMiddleware(false, true, true);
 
 // ----------------------------------------------------------
 // CORS for Vue frontend
@@ -83,10 +83,10 @@ function getRequestData(Request $request): array
 // Fix 12: Generic error response. Detailed error is logged only.
 function exposeException(Response $response, Throwable $e): Response
 {
+    error_log($e->getMessage());
+
     return jsonResponse($response, [
-        'error' => $e->getMessage(),
-        'file' => $e->getFile(),
-        'line' => $e->getLine()
+        'error' => 'Unable to process request'
     ], 500);
 }
 
@@ -230,11 +230,19 @@ function requireAuth(Request $request, Response $response): array|Response
 
 function requireStaffOrAdmin(array $decoded, Response $response): ?Response
 {
+    if (!in_array($decoded['role'], ['staff', 'admin'], true)) {
+        return jsonResponse($response, ['error' => 'Staff access required'], 403);
+    }
+
     return null;
 }
 
 function requireAdmin(array $decoded, Response $response): ?Response
 {
+    if (($decoded['role'] ?? '') !== 'admin') {
+        return jsonResponse($response, ['error' => 'Admin access required'], 403);
+    }
+
     return null;
 }
 
@@ -243,7 +251,7 @@ function requireAdmin(array $decoded, Response $response): ?Response
 // ----------------------------------------------------------
 $app->get('/', function (Request $request, Response $response) {
     return jsonResponse($response, [
-        'message' => 'Person BMI Slim Backend - Phase 3 JWT Protected Version'
+        'message' => 'Person BMI Slim Backend - Phase 4 Fixed Version'
     ]);
 });
 
